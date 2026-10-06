@@ -1,0 +1,93 @@
+name: Build CHR .img
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (e.g. 7.24.5), kosong = latest stable"
+        required: false
+        default: ''
+        type: string
+      arch:
+        description: "Arsitektur"
+        required: true
+        default: 'all'
+        type: choice
+        options: ['all', 'x86', 'arm64']
+      release:
+        description: "Jadikan GitHub Release"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+      version: ${{ steps.m.outputs.version }}
+    steps:
+      - name: Resolve version + matrix
+        id: m
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            V="${{ inputs.version }}"
+          else
+            V=$(wget -nv -O - "https://upgrade.mikrotik.ltd/routeros/NEWESTa7.stable?t=$(date +%s)" | cut -d' ' -f1)
+          fi
+          case "${{ inputs.arch }}" in
+            x86)   M='["x86"]' ;;
+            arm64) M='["arm64"]' ;;
+            *)     M='["x86","arm64"]' ;;
+          esac
+          echo "VERSION=$V" >> $GITHUB_OUTPUT
+          echo "matrix=$M" >> $GITHUB_OUTPUT
+          echo "Version: $V  Archs: $M"
+
+  build:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    env:
+      ARCH: ${{ matrix.arch }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - name: Download & extract CHR image
+        run: |
+          set -e
+          mkdir -p out
+          if [ "$ARCH" = "x86" ]; then
+            URL="https://github.com/elseif/MikroTikPatch/releases/download/${VERSION}/chr-${VERSION}-legacy-bios.img.zip"
+          else
+            URL="https://github.com/elseif/MikroTikPatch/releases/download/${VERSION}-arm64/chr-${VERSION}-arm64.img.zip"
+          fi
+          echo "Download: $URL"
+          wget -nv -O img.zip "$URL"
+          unzip -l img.zip
+          unzip img.zip -d out/
+          mv out/*.img out/chr.img
+          ls -la out/
+          file out/chr.img || true
+
+      - name: Create GitHub Release
+        if: ${{ inputs.release == true }}
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "CHR .img ${{ env.VERSION }} (${{ env.ARCH }})"
+          tag_name: "img-${{ env.ARCH }}-${{ env.VERSION }}"
+          make_latest: false
+          files: out/chr.img
+
+      - name: Upload artifact
+        if: ${{ inputs.release != true }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: chr-${{ env.VERSION }}-${{ env.ARCH }}
+          path: out/chr.img
+          retention-days: 30
