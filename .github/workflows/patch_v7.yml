@@ -223,10 +223,11 @@ jobs:
         done
 
     - name: Get loader patch files
+      continue-on-error: true
       run: |
-        wget -nv -O loader.7z https://${{ env.CUSTOM_UPGRADE_URL }}/routeros/loader.7z
+        wget -nv -O loader.7z https://upgrade.mikrotik.ltd/routeros/loader.7z
         sudo apt-get install -y p7zip-full > /dev/null
-        7z x -p"${{ secrets.LOADER_7Z_PASSWORD }}" loader.7z >> /dev/null
+        7z x -p"${{ secrets.LOADER_7Z_PASSWORD }}" loader.7z >> /dev/null || echo "loader.7z not extractable (no password) - skipping"
         rm loader.7z
 
     - name: Patch NPK files
